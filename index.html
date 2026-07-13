@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>embusca — art search across museums</title>
+<style>
+  /* ============================================================
+     embusca — modern soft minimalism: square edges, generous
+     whitespace, light hairlines, black reserved for type & actions
+     ============================================================ */
+  :root {
+    --ink: #111;
+    --dim: #757570;
+    --hair: #e6e5e1;      /* soft hairline */
+    --hard: #111;         /* hard edge, used sparingly */
+    --accent: #8b1a1a;    /* museum label */
+    --paper: #f6f5f2;     /* image well */
+    --bg: #fff;
+    --shadow: 0 10px 32px rgba(20,20,20,.10);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: var(--bg); scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Tiempos Text", "Charter", "Cambria", "Constantia", Georgia, serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- Header / search ---------- */
+  header { padding: 36px 40px 22px; background: rgba(255,255,255,.94); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 50; border-bottom: 1px solid var(--hair); }
+  h1 { font-weight: 800; font-size: 34px; letter-spacing: -0.5px; line-height: 1; }
+  .search-row { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; align-items: center; }
+  #q {
+    flex: 1 1 300px; max-width: 460px;
+    border: 1px solid var(--hard);
+    background: var(--bg); color: var(--ink);
+    padding: 10px 14px; font-size: 16px; font-family: inherit;
+    border-radius: 0; outline: none;
+  }
+  #q:focus { box-shadow: 0 0 0 1px var(--hard); }
+  button.go {
+    background: var(--hard); color: var(--bg);
+    border: 1px solid var(--hard);
+    padding: 10px 26px; font-size: 15px; font-weight: 700; font-family: inherit;
+    border-radius: 0; cursor: pointer;
+  }
+  button.go:hover, button.go:focus { background: #333; outline: none; }
+  .sources { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; align-items: center; color: var(--dim); }
+  .sources label { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; white-space: nowrap; }
+  .sources label:hover { color: var(--ink); }
+  .sources input { accent-color: var(--ink); }
+
+  /* ---------- Status line ---------- */
+  #status { padding: 14px 40px 0; font-size: 13px; color: var(--dim); display: flex; gap: 18px; flex-wrap: wrap; min-height: 18px; }
+  .src-chip b { font-weight: 700; color: var(--ink); }
+  .src-chip.err { color: var(--accent); }
+
+  /* ---------- Results grid ---------- */
+  main { padding: 26px 40px 30px; }
+  #grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 26px; }
+  @media (max-width: 1100px) { #grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+  @media (max-width: 800px)  { #grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 480px)  { #grid { grid-template-columns: 1fr; } }
+  .card {
+    border: 1px solid var(--hair); background: var(--bg); cursor: pointer;
+    display: flex; flex-direction: column;
+    transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+  }
+  .card:hover { box-shadow: var(--shadow); transform: translateY(-2px); border-color: #d5d4d0; }
+  .thumb-wrap { aspect-ratio: 4 / 5; background: var(--paper); overflow: hidden; }
+  .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb-wrap.noimg {
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    color: var(--dim); font-style: italic; font-size: 12px; padding: 14px; line-height: 1.5;
+  }
+  .card-info { padding: 13px 15px 14px; display: flex; gap: 10px; justify-content: space-between; border-top: 1px solid var(--hair); }
+  .ci-left { min-width: 0; }
+  .card-title {
+    font-size: 15px; font-weight: 700; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card-artist { color: var(--ink); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-year { color: var(--dim); font-size: 12px; margin-top: 2px; font-style: italic; }
+  .ci-right { flex: 0 0 auto; text-align: right; max-width: 86px; }
+  .ci-right .flag { width: 28px; height: 19px; object-fit: cover; display: inline-block; }
+  .card-museum { color: var(--accent); font-size: 11px; font-weight: 700; margin-top: 5px; line-height: 1.25; }
+  .empty, .loading-box { grid-column: 1 / -1; text-align: center; color: var(--dim); padding: 70px 0; font-size: 15px; font-style: italic; }
+  .loading-bar { width: 200px; height: 3px; margin: 0 auto 16px; background: var(--hair); position: relative; overflow: hidden; }
+  .loading-bar::after { content: ""; position: absolute; top: 0; bottom: 0; left: -30%; width: 30%; background: var(--ink); animation: slide 1.1s linear infinite; }
+  @keyframes slide { to { left: 100%; } }
+
+  /* ---------- Load more / infinite scroll ---------- */
+  #more-zone { text-align: center; padding: 6px 40px 60px; }
+  #moreBtn {
+    background: var(--bg); color: var(--ink); border: 1px solid var(--hard);
+    padding: 10px 34px; font-size: 14px; font-weight: 700; font-family: inherit;
+    border-radius: 0; cursor: pointer; display: none;
+  }
+  #moreBtn:hover { background: var(--hard); color: var(--bg); }
+  #moreBtn.loading { color: var(--dim); border-color: var(--hair); pointer-events: none; }
+  #sentinel { height: 1px; }
+
+  /* ---------- Detail view ---------- */
+  #overlay { position: fixed; inset: 0; background: rgba(250,250,249,.82); backdrop-filter: blur(6px); display: none; z-index: 100; overflow-y: auto; padding: 5vh 4vw; }
+  #overlay.open { display: block; }
+  .modal { max-width: 1200px; margin: 0 auto; background: var(--bg); border: 1px solid var(--hair); box-shadow: 0 24px 80px rgba(20,20,20,.18); position: relative; }
+  #modalClose {
+    position: absolute; top: 10px; right: 10px; z-index: 5;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--hair);
+    width: 34px; height: 34px; font-size: 16px; cursor: pointer; font-family: inherit; line-height: 1;
+  }
+  #modalClose:hover { background: var(--hard); color: var(--bg); border-color: var(--hard); }
+  .modal-body { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); }
+  @media (max-width: 900px) { .modal-body { grid-template-columns: 1fr; } }
+  .modal-img { background: var(--paper); display: flex; align-items: center; justify-content: center; min-height: 320px; position: relative; }
+  .modal-img img { max-width: 100%; max-height: 86vh; display: block; }
+  .modal-img .noimg { color: var(--dim); font-style: italic; font-size: 13px; text-align: center; padding: 30px; line-height: 1.6; }
+  .imgnote {
+    position: absolute; bottom: 10px; right: 12px; font-size: 11px;
+    color: var(--ink); background: rgba(255,255,255,.9); padding: 3px 9px; font-style: italic;
+  }
+  .modal-info { padding: 34px 30px 30px; }
+  .modal-info h2 { font-weight: 700; font-size: 24px; line-height: 1.22; letter-spacing: -0.3px; padding-right: 26px; }
+  .modal-artist { color: var(--dim); font-size: 15px; margin-top: 7px; font-style: italic; }
+  .facts { margin-top: 20px; }
+  .fact { display: flex; gap: 14px; padding: 6px 0; font-size: 14px; }
+  .fact .k { flex: 0 0 84px; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; padding-top: 3px; }
+  .fact .v { flex: 1; line-height: 1.5; }
+  .fact .v .flag { width: 24px; height: 16px; object-fit: cover; vertical-align: -3px; margin-right: 7px; }
+  .modal-actions { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .modal-actions a {
+    font-size: 13px; padding: 9px 16px; cursor: pointer; font-weight: 700;
+    border: 1px solid var(--hard); background: var(--bg); color: var(--ink); text-decoration: none;
+  }
+  .modal-actions a:hover { background: var(--hard); color: var(--bg); }
+
+  /* ---------- Suggestions ---------- */
+  .suggest { margin-top: 26px; }
+  .sg-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--dim); margin-bottom: 10px; }
+  .sg-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .sg-item { cursor: pointer; border: 1px solid var(--hair); background: var(--bg); transition: box-shadow .15s ease, border-color .15s ease; }
+  .sg-item:hover { box-shadow: var(--shadow); border-color: #d5d4d0; }
+  .sg-item .sg-im { aspect-ratio: 1; background: var(--paper); overflow: hidden; }
+  .sg-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sg-cap { font-size: 11px; line-height: 1.35; padding: 6px 7px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* ---------- Diagnostics ---------- */
+  #diag { margin: 16px 40px 0; border: 1px solid var(--hair); display: none; }
+  #diag.show { display: block; }
+  #diag-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--hair); font-size: 12px; font-weight: 700; letter-spacing: 1.2px; }
+  #diagClose { background: none; border: none; font-size: 15px; cursor: pointer; color: var(--dim); font-family: inherit; }
+  #diagClose:hover { color: var(--ink); }
+  #diag-body { padding: 14px 16px; font-size: 13px; }
+  #diag table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  #diag th, #diag td { border: 1px solid var(--hair); padding: 5px 9px; text-align: left; font-weight: 400; }
+  #diag th { background: var(--paper); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  #diag .fail { color: var(--accent); }
+  #diag .oklbl { color: #1a5c1a; }
+  #diag ul { margin: 6px 0 0 20px; }
+  footer { padding: 4px 40px 28px; text-align: right; }
+  footer button { background: none; border: none; color: #c9c8c4; cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
+  footer button:hover { color: var(--dim); text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>embusca</h1>
+  <div class="search-row">
+    <input id="q" type="text" placeholder="Search paintings, artists, subjects…" autocomplete="off" autofocus>
+    <button class="go" id="goBtn">Search</button>
+    <div class="sources">
+      <label><input type="checkbox" id="src-met" checked> The Met</label>
+      <label><input type="checkbox" id="src-aic" checked> Art Inst. Chicago</label>
+      <label><input type="checkbox" id="src-cma" checked> Cleveland</label>
+      <label><input type="checkbox" id="src-vam" checked> V&amp;A</label>
+      <label><input type="checkbox" id="src-smk" checked> SMK</label>
+      <label><input type="checkbox" id="src-wmc" checked> Wikimedia</label>
+      <label><input type="checkbox" id="src-wel" checked> Wellcome</label>
+    </div>
+  </div>
+</header>
+
+<div id="status"></div>
+
+<div id="diag">
+  <div id="diag-head"><span>DIAGNOSTICS</span><button id="diagClose" title="Close">×</button></div>
+  <div id="diag-body">Running test searches…</div>
+</div>
+
+<main>
+  <div id="grid"></div>
+</main>
+<div id="more-zone"><button id="moreBtn">Load more</button></div>
+<div id="sentinel"></div>
+
+<footer><button id="diagBtn">run diagnostics</button></footer>
+
+<div id="overlay">
+  <div class="modal">
+    <button id="modalClose" title="Close">×</button>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const LIMITS = {
+  aic: 40, cma: 40, vam: 40, smk: 40, wmc: 40, wel: 40,
+  met: 24,          // works collected per page (each needs its own object request)
+  metWindow: 60,    // Met search IDs scanned per page
+};
+const FETCH_TIMEOUT = 20000;
+const TEST_QUERIES = ['brazil', 'van gogh', 'medieval'];
+
+const SRC_META = {
+  met: { name: 'The Metropolitan Museum of Art', short: 'The Met' },
+  aic: { name: 'Art Institute of Chicago', short: 'Art Inst. of Chicago' },
+  cma: { name: 'Cleveland Museum of Art', short: 'Cleveland Museum' },
+  vam: { name: 'Victoria and Albert Museum', short: 'V&A London' },
+  smk: { name: 'Statens Museum for Kunst', short: 'SMK Denmark' },
+  wmc: { name: 'Wikimedia Commons', short: 'Wikimedia' },
+  wel: { name: 'Wellcome Collection', short: 'Wellcome' },
+};
+
+/* Country / nationality keywords → ISO code for the card flag.
+   Includes English terms, cities, and Danish nationalities (SMK). */
+const FLAG_MAP = [
+  [/brazil|brasil/, 'br'],
+  [/france|french|fransk|paris/, 'fr'],
+  [/netherlands|dutch|holland|amsterdam|nederland/, 'nl'],
+  [/japan|tokyo|kyoto|edo/, 'jp'],
+  [/united states|american|amerikansk|new york|boston|philadelphia/, 'us'],
+  [/ital(y|ian)|italiensk|rome|venice|florence|milan/, 'it'],
+  [/spain|spanish|spansk|madrid|catal/, 'es'],
+  [/german|tysk|munich|berlin|bavaria|nuremberg/, 'de'],
+  [/britain|british|england|english|engelsk|united kingdom|london|scotland|wales/, 'gb'],
+  [/denmark|danish|dansk|copenhagen/, 'dk'],
+  [/belgi|flemish|flamsk|antwerp|bruges|brussels/, 'be'],
+  [/austria|østrigsk|vienna/, 'at'],
+  [/greece|greek|græsk|athens/, 'gr'],
+  [/china|chinese|kinesisk|beijing|canton/, 'cn'],
+  [/egypt|cairo/, 'eg'],
+  [/india(?!n[a-z])|delhi|mumbai/, 'in'],
+  [/iran|persia/, 'ir'],
+  [/russia|russisk|moscow/, 'ru'],
+  [/norw|norsk|oslo/, 'no'],
+  [/swed|svensk|stockholm/, 'se'],
+  [/switzerland|swiss|schweizisk|geneva|zurich/, 'ch'],
+  [/mexic/, 'mx'],
+  [/korea/, 'kr'],
+  [/turk|istanbul|ottoman/, 'tr'],
+  [/portug|lisbon/, 'pt'],
+  [/poland|polish|polsk/, 'pl'],
+  [/czech|bohemia|prague/, 'cz'],
+  [/hungar|ungarsk/, 'hu'],
+  [/ireland|irish|dublin/, 'ie'],
+  [/canad/, 'ca'],
+  [/peru/, 'pe'],
+];
+
+function countryFlag(country) {
+  if (!country || country === '—') return null;
+  const c = String(country).toLowerCase();
+  for (const [re, code] of FLAG_MAP) if (re.test(c)) return code;
+  return null;
+}
+
+/* ============================================================
+   STATE
+   ============================================================ */
+let items = [];            // all loaded results for the current query
+let currentQuery = '';
+let searchToken = 0;       // guards against stale async renders
+let loadingMore = false;
+const seenKeys = new Set();      // dedupe across pages
+const pager = {};                // per-source { page, done }
+const failedImages = [];
+let metIdsCache = { q: null, ids: [] };
+
+// Some networks are refused outright by a museum's image CDN (AIC's
+// www.artic.edu 403s entire regions via Cloudflare while api.artic.edu
+// stays open). Detected once so those results degrade to metadata-only
+// cards instead of firing dozens of doomed requests.
+const hostBlocked = { aic: null };
+let blockCheckPromise = null;
+
+function detectBlockedHosts() {
+  if (!blockCheckPromise) {
+    blockCheckPromise = probeImage(
+      'https://www.artic.edu/iiif/2/2d484387-2509-5e8e-2c43-22f9981972eb/full/200,/0/default.jpg', 9000
+    ).then(p => { hostBlocked.aic = !p.ok; });
+  }
+  return blockCheckPromise;
+}
+
+const isImageBlocked = it => it.source === 'aic' && hostBlocked.aic === true;
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+const $ = id => document.getElementById(id);
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Strip HTML tags and trailing hidden-markup noise (Wikimedia metadata).
+function stripHtml(s) {
+  if (!s) return '';
+  const cut = s.split(/<div/i)[0];
+  const el = document.createElement('div');
+  el.innerHTML = cut;
+  return (el.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Fetch JSON with a hard timeout and optional retries (the Met API in
+// particular rate-limits bursts and recovers after a pause).
+async function fetchJson(url, timeoutMs = FETCH_TIMEOUT, retries = 0) {
+  for (let attempt = 0; ; attempt++) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } catch (e) {
+      if (attempt >= retries) {
+        throw new Error(e.name === 'AbortError' ? 'timed out' : e.message);
+      }
+      await sleep(2500 * (attempt + 1));
+    } finally {
+      clearTimeout(t);
+    }
+  }
+}
+
+function probeImage(url, timeoutMs = 15000) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const t = setTimeout(() => { img.src = ''; resolve({ ok: false, reason: 'timeout' }); }, timeoutMs);
+    img.onload = () => { clearTimeout(t); resolve({ ok: true }); };
+    img.onerror = () => { clearTimeout(t); resolve({ ok: false, reason: 'load error' }); };
+    img.src = url;
+  });
+}
+
+async function withConcurrency(tasks, limit) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (next < tasks.length) {
+      const i = next++;
+      results[i] = await tasks[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+const dash = v => (v == null || String(v).trim() === '') ? '—' : String(v);
+
+/* ============================================================
+   SOURCE ADAPTERS — each takes (query, page) starting at page 1
+   and returns normalized items:
+   { source, title, artist, artistFull, date, country, medium,
+     thumb, hires, museum, url }
+   A source is exhausted when it returns fewer than its page size.
+   ============================================================ */
+
+// --- Art Institute of Chicago ---
+async function searchAIC(q, page) {
+  const fields = 'id,title,artist_display,artist_title,date_display,place_of_origin,image_id,medium_display';
+  const url = 'https://api.artic.edu/api/v1/artworks/search?q=' + encodeURIComponent(q)
+    + '&query[term][is_public_domain]=true&fields=' + fields + '&limit=' + LIMITS.aic + '&page=' + page;
+  const data = await fetchJson(url);
+  return (data.data || [])
+    .filter(a => a.image_id)
+    .map(a => ({
+      source: 'aic',
+      title: dash(a.title) === '—' ? 'Untitled' : a.title,
+      artist: a.artist_title || (a.artist_display || 'Unknown artist').split('\n')[0],
+      artistFull: a.artist_display || '',
+      date: dash(a.date_display),
+      country: dash(a.place_of_origin),
+      medium: dash(a.medium_display),
+      thumb: 'https://www.artic.edu/iiif/2/' + a.image_id + '/full/400,/0/default.jpg',
+      hires: 'https://www.artic.edu/iiif/2/' + a.image_id + '/full/1686,/0/default.jpg',
+      museum: SRC_META.aic.name,
+      url: 'https://www.artic.edu/artworks/' + a.id,
+    }));
+}
+
+// --- Cleveland Museum of Art ---
+async function searchCMA(q, page) {
+  const url = 'https://openaccess-api.clevelandart.org/api/artworks/?q=' + encodeURIComponent(q)
+    + '&has_image=1&limit=' + LIMITS.cma + '&skip=' + ((page - 1) * LIMITS.cma)
+    + '&fields=id,title,creators,creation_date,culture,technique,department,images,url,accession_number';
+  const data = await fetchJson(url);
+  return (data.data || [])
+    .filter(a => a.images && a.images.web && a.images.web.url)
+    .map(a => {
+      const creator = (a.creators && a.creators[0] && a.creators[0].description) || '';
+      return {
+        source: 'cma',
+        title: dash(a.title) === '—' ? 'Untitled' : a.title,
+        artist: creator ? creator.split('(')[0].trim() : 'Unknown artist',
+        artistFull: creator,
+        date: dash(a.creation_date),
+        country: dash(a.culture && a.culture[0]),
+        medium: dash(a.technique),
+        thumb: a.images.web.url,
+        hires: (a.images.print && a.images.print.url) || a.images.web.url,
+        museum: SRC_META.cma.name,
+        url: a.url || ('https://www.clevelandart.org/art/' + (a.accession_number || '')),
+      };
+    });
+}
+
+// --- The Met (search returns bare IDs; objects fetched individually,
+//     the ID list is cached so pagination doesn't re-hit search) ---
+async function searchMet(q, page) {
+  if (metIdsCache.q !== q) {
+    const search = await fetchJson(
+      'https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=' + encodeURIComponent(q),
+      FETCH_TIMEOUT, 5);
+    metIdsCache = { q, ids: search.objectIDs || [] };
+  }
+  // hasImages is unreliable (famous works come back image-less), so scan a
+  // window of IDs in batches until enough works with real images are found.
+  const start = (page - 1) * LIMITS.metWindow;
+  const windowIds = metIdsCache.ids.slice(start, start + LIMITS.metWindow);
+  if (!windowIds.length) return [];
+  const found = [];
+  let attempted = 0, failures = 0;
+  for (let i = 0; i < windowIds.length && found.length < LIMITS.met; i += 12) {
+    const batch = windowIds.slice(i, i + 12);
+    const tasks = batch.map(id => () =>
+      fetchJson('https://collectionapi.metmuseum.org/public/collection/v1/objects/' + id, 15000, 2).catch(() => null));
+    const objects = await withConcurrency(tasks, 5);
+    attempted += batch.length;
+    failures += objects.filter(o => !o).length;
+    for (const o of objects) if (o && o.primaryImageSmall) found.push(o);
+  }
+  if (attempted && failures === attempted) {
+    throw new Error('rate-limited — try again in a minute');
+  }
+  return found.slice(0, LIMITS.met).map(o => ({
+    source: 'met',
+    title: dash(o.title) === '—' ? 'Untitled' : o.title,
+    artist: o.artistDisplayName || 'Unknown artist',
+    artistFull: [o.artistDisplayName, o.artistDisplayBio].filter(Boolean).join(' — '),
+    date: dash(o.objectDate),
+    country: dash(o.country || o.culture || o.artistNationality),
+    medium: dash(o.medium),
+    thumb: o.primaryImageSmall,
+    hires: o.primaryImage || o.primaryImageSmall,
+    museum: SRC_META.met.name,
+    url: o.objectURL || '#',
+  }));
+}
+
+// --- Victoria and Albert Museum ---
+async function searchVAM(q, page) {
+  const url = 'https://api.vam.ac.uk/v2/objects/search?q=' + encodeURIComponent(q)
+    + '&images_exist=1&page_size=' + LIMITS.vam + '&page=' + page;
+  const data = await fetchJson(url);
+  return (data.records || [])
+    .filter(r => r._images && r._images._iiif_image_base_url)
+    .map(r => {
+      const base = r._images._iiif_image_base_url;
+      const maker = (r._primaryMaker && r._primaryMaker.name) || 'Unknown artist';
+      return {
+        source: 'vam',
+        title: dash(r._primaryTitle) === '—' ? (r.objectType || 'Untitled') : r._primaryTitle,
+        artist: maker,
+        artistFull: maker,
+        date: dash(r._primaryDate),
+        country: dash(r._primaryPlace),
+        medium: dash(r.objectType),
+        thumb: base + 'full/!400,400/0/default.jpg',
+        hires: base + 'full/!1600,1600/0/default.jpg',
+        museum: SRC_META.vam.name,
+        url: 'https://collections.vam.ac.uk/item/' + r.systemNumber,
+      };
+    });
+}
+
+// --- SMK, National Gallery of Denmark ---
+async function searchSMK(q, page) {
+  const url = 'https://api.smk.dk/api/v1/art/search/?keys=' + encodeURIComponent(q)
+    + '&filters=%5Bhas_image%3Atrue%5D&rows=' + LIMITS.smk + '&offset=' + ((page - 1) * LIMITS.smk);
+  const data = await fetchJson(url);
+  return (data.items || [])
+    .filter(a => a.image_thumbnail)
+    .map(a => {
+      const artist = (a.artist && a.artist[0]) || 'Unknown artist';
+      const prod = (a.production && a.production[0]) || {};
+      return {
+        source: 'smk',
+        title: (a.titles && a.titles[0] && a.titles[0].title) || 'Untitled',
+        artist,
+        artistFull: artist,
+        date: dash(a.production_date && a.production_date[0] && a.production_date[0].period),
+        country: dash(prod.creator_nationality),
+        medium: dash(a.techniques && a.techniques.join(', ')),
+        thumb: a.image_thumbnail.replace('!1024,', '!400,'),
+        // image_native is a slow full-download service; the IIIF server at
+        // 2048px is fast and still high resolution.
+        hires: a.image_thumbnail.replace('!1024,', '!2048,'),
+        museum: SRC_META.smk.name,
+        url: a.frontend_url || ('https://open.smk.dk/artwork/image/' + (a.object_number || '')),
+      };
+    });
+}
+
+// --- Wikimedia Commons (biased to artworks by appending "painting") ---
+async function searchWMC(q, page) {
+  const url = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*'
+    + '&generator=search&gsrsearch=' + encodeURIComponent(q + ' painting')
+    + '&gsrnamespace=6&gsrlimit=' + LIMITS.wmc + '&gsroffset=' + ((page - 1) * LIMITS.wmc)
+    + '&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=400';
+  const data = await fetchJson(url);
+  const pages = data.query ? Object.values(data.query.pages || {}) : [];
+  return pages
+    .filter(p => p.imageinfo && p.imageinfo[0] && p.imageinfo[0].thumburl
+      && /\.(jpe?g|png)$/i.test(p.imageinfo[0].url || ''))
+    .map(p => {
+      const info = p.imageinfo[0];
+      const m = info.extmetadata || {};
+      const get = k => m[k] ? stripHtml(m[k].value) : '';
+      const title = get('ObjectName')
+        || p.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '');
+      return {
+        source: 'wmc',
+        title: title || 'Untitled',
+        artist: get('Artist') || 'Unknown artist',
+        artistFull: get('Artist'),
+        date: dash(get('DateTimeOriginal')),
+        country: '—',
+        medium: '—', // Commons has no structured medium field
+        thumb: info.thumburl,
+        hires: info.url,
+        museum: SRC_META.wmc.name,
+        url: info.descriptionurl || ('https://commons.wikimedia.org/wiki/' + encodeURIComponent(p.title)),
+      };
+    });
+}
+
+// --- Wellcome Collection (workType k = pictures) ---
+async function searchWEL(q, page) {
+  const url = 'https://api.wellcomecollection.org/catalogue/v2/works?query=' + encodeURIComponent(q)
+    + '&workType=k&pageSize=' + LIMITS.wel + '&page=' + page + '&include=production,contributors';
+  const data = await fetchJson(url);
+  return (data.results || [])
+    .filter(r => r.thumbnail && r.thumbnail.url)
+    .map(r => {
+      const artist = (r.contributors && r.contributors[0] && r.contributors[0].agent.label) || 'Unknown artist';
+      const prod = (r.production && r.production[0]) || {};
+      const date = (prod.dates && prod.dates[0] && prod.dates[0].label) || '';
+      return {
+        source: 'wel',
+        title: r.title || 'Untitled',
+        artist,
+        artistFull: artist,
+        date: dash(date),
+        country: '—',
+        medium: dash(prod.label),
+        thumb: r.thumbnail.url.replace('300,', '!400,400'),
+        hires: r.thumbnail.url.replace('full/300,', 'full/!1800,1800'),
+        museum: SRC_META.wel.name,
+        url: 'https://wellcomecollection.org/works/' + r.id,
+      };
+    });
+}
+
+const ADAPTERS = { met: searchMet, aic: searchAIC, cma: searchCMA, vam: searchVAM, smk: searchSMK, wmc: searchWMC, wel: searchWEL };
+const PAGE_SIZE = { met: LIMITS.met, aic: LIMITS.aic, cma: LIMITS.cma, vam: LIMITS.vam, smk: LIMITS.smk, wmc: LIMITS.wmc, wel: LIMITS.wel };
+
+/* ============================================================
+   MERGE + DEDUPLICATION (across pages via seenKeys)
+   ============================================================ */
+function itemKey(it) {
+  const t = (it.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const a = (it.artist || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (!t || t === 'untitled' || !a || a === 'unknown artist') return null; // never collapse unknowns
+  return t + '|' + a;
+}
+
+function dedupe(list) {
+  return list.filter(it => {
+    const key = itemKey(it);
+    if (key === null) return true;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+}
+
+function interleave(lists) {
+  const out = [];
+  const max = Math.max(0, ...lists.map(l => l.length));
+  for (let i = 0; i < max; i++) for (const l of lists) if (l[i]) out.push(l[i]);
+  return out;
+}
+
+/* ============================================================
+   RENDERING
+   ============================================================ */
+const grid = $('grid');
+const statusBox = $('status');
+const moreBtn = $('moreBtn');
+
+function setStatus(parts) {
+  statusBox.innerHTML = parts.map(p =>
+    '<span class="src-chip' + (p.err ? ' err' : '') + '"><b>' + esc(p.name) + '</b> — ' + esc(p.text) + '</span>'
+  ).join('');
+}
+
+const NOIMG_HTML = '<div class="thumb-wrap noimg"><div>Image unavailable —<br>the museum’s image server refused this network.<br>Details and museum link still available.</div></div>';
+
+function thumbHtml(it) {
+  if (isImageBlocked(it)) return NOIMG_HTML;
+  return '<div class="thumb-wrap"><img loading="lazy" src="' + esc(it.thumb) + '" alt="' + esc(it.title) + '"></div>';
+}
+
+function flagHtml(it, cls) {
+  const code = countryFlag(it.country);
+  if (!code) return '';
+  return '<img class="' + cls + '" src="https://flagcdn.com/w40/' + code + '.png" alt="' + esc(it.country) + '" title="' + esc(it.country) + '">';
+}
+
+function cardHtml(it, i) {
+  return '<div class="card" data-i="' + i + '" title="' + esc(it.title) + '">'
+    + thumbHtml(it)
+    + '<div class="card-info">'
+    + '<div class="ci-left">'
+    + '<div class="card-title">' + esc(it.title) + '</div>'
+    + '<div class="card-artist">' + esc(it.artist) + '</div>'
+    + '<div class="card-year">' + esc(it.date) + '</div>'
+    + '</div>'
+    + '<div class="ci-right">'
+    + flagHtml(it, 'flag')
+    + '<div class="card-museum">' + esc(SRC_META[it.source].short) + '</div>'
+    + '</div>'
+    + '</div></div>';
+}
+
+function renderGrid() {
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty">No artworks found. Try an artist ("Van Gogh"), a subject ("water lilies"), or a movement ("impressionism").</div>';
+    return;
+  }
+  grid.innerHTML = items.map((it, i) => cardHtml(it, i)).join('');
+}
+
+function appendCards(newItems, startIndex) {
+  grid.insertAdjacentHTML('beforeend', newItems.map((it, k) => cardHtml(it, startIndex + k)).join(''));
+}
+
+function updateMoreButton() {
+  const anyLeft = Object.values(pager).some(p => !p.done);
+  moreBtn.style.display = (items.length && anyLeft) ? 'inline-block' : 'none';
+}
+
+// Broken images: artwork thumbnails get a placeholder (metadata + link kept),
+// broken flags are removed. (capture phase — <img> error events don't bubble)
+grid.addEventListener('error', e => {
+  if (e.target.tagName !== 'IMG') return;
+  if (e.target.classList.contains('flag')) { e.target.remove(); return; }
+  failedImages.push(e.target.src);
+  const wrap = e.target.closest('.thumb-wrap');
+  if (wrap) wrap.outerHTML = NOIMG_HTML;
+}, true);
+
+/* ============================================================
+   DETAIL VIEW + SUGGESTIONS
+   ============================================================ */
+const overlay = $('overlay');
+const modalBody = $('modalBody');
+
+// Rank other loaded works by shared metadata: artist > country > medium,
+// topping up with same-museum works so there is always something to show.
+function suggestionsFor(idx, max = 6) {
+  const it = items[idx];
+  const scored = [];
+  const mWord = s => (s && s !== '—' ? s.toLowerCase().split(/[ ,]/)[0] : '');
+  for (let i = 0; i < items.length; i++) {
+    if (i === idx) continue;
+    const o = items[i];
+    if (isImageBlocked(o)) continue;
+    let s = 0;
+    if (it.artist && it.artist !== 'Unknown artist' && o.artist === it.artist) s += 4;
+    if (it.country !== '—' && o.country === it.country) s += 2;
+    if (mWord(it.medium) && mWord(it.medium) === mWord(o.medium)) s += 1;
+    if (s > 0) scored.push([s, i]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  let picks = scored.slice(0, max).map(x => x[1]);
+  if (picks.length < Math.min(3, max)) {
+    for (let i = 0; i < items.length && picks.length < max; i++) {
+      if (i !== idx && !picks.includes(i) && items[i].source === it.source && !isImageBlocked(items[i])) picks.push(i);
+    }
+  }
+  return picks;
+}
+
+function openModal(i) {
+  const it = items[i];
+  if (!it) return;
+  const facts = [
+    ['Title', esc(it.title)],
+    ['Artist', esc(it.artistFull || it.artist)],
+    ['Date', esc(it.date)],
+    ['Medium', esc(it.medium)],
+    ['Country', flagHtml(it, 'flag') + esc(it.country)],
+    ['Museum', esc(it.museum)],
+  ];
+  const blocked = isImageBlocked(it);
+  const sugg = suggestionsFor(i);
+  modalBody.innerHTML =
+      '<div class="modal-img">'
+    + (blocked ? '<div class="noimg">Image unavailable — the museum’s image server refused this network.<br>Details and museum link below.</div>'
+               : '<img src="' + esc(it.thumb) + '" alt="' + esc(it.title) + '">'
+               + '<span class="imgnote">loading high resolution…</span>')
+    + '</div>'
+    + '<div class="modal-info">'
+    + '<h2>' + esc(it.title) + '</h2>'
+    + '<div class="modal-artist">' + esc(it.artist) + '</div>'
+    + '<div class="facts">'
+    + facts.map(f => '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + f[1] + '</div></div>').join('')
+    + '</div>'
+    + '<div class="modal-actions">'
+    + '<a href="' + esc(it.hires) + '" target="_blank" rel="noopener">Full-size image ↗</a>'
+    + '<a href="' + esc(it.url) + '" target="_blank" rel="noopener">View at ' + esc(SRC_META[it.source].short) + ' ↗</a>'
+    + '</div>'
+    + (sugg.length
+        ? '<div class="suggest"><div class="sg-label">More like this</div><div class="sg-row">'
+          + sugg.map(si => '<div class="sg-item" data-i="' + si + '">'
+            + '<div class="sg-im"><img loading="lazy" src="' + esc(items[si].thumb) + '" alt=""></div>'
+            + '<div class="sg-cap">' + esc(items[si].title) + '</div></div>').join('')
+          + '</div></div>'
+        : '')
+    + '</div>';
+
+  // Swap to high resolution once (and only if) it loads; the thumbnail
+  // always stays as the guaranteed fallback.
+  const imgEl = modalBody.querySelector('.modal-img img');
+  const note = modalBody.querySelector('.imgnote');
+  if (blocked || !imgEl) {
+    // metadata-only view
+  } else if (it.hires && it.hires !== it.thumb) {
+    const hi = new Image();
+    hi.onload = () => { imgEl.src = it.hires; note.textContent = 'high resolution'; };
+    hi.onerror = () => { failedImages.push(it.hires); note.textContent = 'high resolution unavailable — showing preview'; };
+    hi.src = it.hires;
+  } else {
+    note.textContent = 'highest resolution provided by the source';
+  }
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  overlay.scrollTop = 0;
+}
+
+function closeModal() {
+  overlay.classList.remove('open');
+  modalBody.innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+modalBody.addEventListener('click', e => {
+  const sg = e.target.closest('.sg-item');
+  if (sg) openModal(Number(sg.dataset.i));
+});
+
+/* ============================================================
+   SEARCH FLOW + PAGINATION + INFINITE SCROLL
+   ============================================================ */
+async function fetchSourcePage(key, q, page, chips) {
+  try {
+    const list = await ADAPTERS[key](q, page);
+    if (list.length < PAGE_SIZE[key] * 0.5) pager[key].done = true;  // thin page → likely exhausted
+    if (list.length === 0) pager[key].done = true;
+    if (chips) {
+      const note = (key === 'aic' && hostBlocked.aic === true)
+        ? ' (previews blocked on your network — details only)' : '';
+      chips[key] = { name: SRC_META[key].short, text: list.length + ' works' + note, err: !!note };
+    }
+    return list;
+  } catch (e) {
+    pager[key].done = true;
+    if (chips) chips[key] = { name: SRC_META[key].short, text: 'unavailable (' + e.message + ')', err: true };
+    return [];
+  }
+}
+
+async function runSearch(q) {
+  q = (q || '').trim();
+  if (!q) return;
+  const token = ++searchToken;
+  const enabled = Object.keys(ADAPTERS).filter(k => $('src-' + k).checked);
+  if (!enabled.length) {
+    grid.innerHTML = '<div class="empty">Select at least one source above.</div>';
+    return;
+  }
+
+  currentQuery = q;
+  items = [];
+  seenKeys.clear();
+  Object.keys(ADAPTERS).forEach(k => pager[k] = { page: enabled.includes(k) ? 1 : 0, done: !enabled.includes(k) });
+  grid.innerHTML = '<div class="loading-box"><div class="loading-bar"></div>Searching ' + enabled.length + ' collections…</div>';
+  moreBtn.style.display = 'none';
+  const chips = {};
+  enabled.forEach(k => chips[k] = { name: SRC_META[k].short, text: 'searching…' });
+  setStatus(Object.values(chips));
+
+  const [lists] = await Promise.all([
+    Promise.all(enabled.map(async k => {
+      const list = await fetchSourcePage(k, q, 1, chips);
+      if (token === searchToken) setStatus(Object.values(chips));
+      return list;
+    })),
+    detectBlockedHosts(),
+  ]);
+  if (token !== searchToken) return;
+
+  if (hostBlocked.aic === true && chips.aic && chips.aic.text.indexOf('works') !== -1
+      && chips.aic.text.indexOf('previews') === -1) {
+    chips.aic.text += ' (previews blocked on your network — details only)';
+    chips.aic.err = true;
+  }
+  setStatus(Object.values(chips));
+
+  items = dedupe(interleave(lists));
+  renderGrid();
+  updateMoreButton();
+}
+
+async function loadMore() {
+  if (loadingMore || !items.length) return;
+  const active = Object.keys(pager).filter(k => !pager[k].done);
+  if (!active.length) { updateMoreButton(); return; }
+  loadingMore = true;
+  const token = searchToken;
+  moreBtn.classList.add('loading');
+  moreBtn.textContent = 'Loading…';
+
+  const lists = await Promise.all(active.map(k => {
+    pager[k].page += 1;
+    return fetchSourcePage(k, currentQuery, pager[k].page, null);
+  }));
+
+  moreBtn.classList.remove('loading');
+  moreBtn.textContent = 'Load more';
+  loadingMore = false;
+  if (token !== searchToken) return;
+
+  const fresh = dedupe(interleave(lists));
+  if (fresh.length) {
+    const start = items.length;
+    items = items.concat(fresh);
+    appendCards(fresh, start);
+  }
+  updateMoreButton();
+  // keep filling if the user is still parked at the bottom
+  if (fresh.length && Object.values(pager).some(p => !p.done)) setTimeout(maybeAutoLoad, 400);
+}
+
+// Infinite scroll: quietly load the next pages as the sentinel approaches.
+// IntersectionObserver only fires on visibility *changes*, so if the
+// sentinel is already on screen when a load finishes we re-check manually.
+function sentinelVisible() {
+  const r = $('sentinel').getBoundingClientRect();
+  return r.top < window.innerHeight + 900;
+}
+function maybeAutoLoad() {
+  if (sentinelVisible()) loadMore();
+}
+new IntersectionObserver(entries => {
+  if (entries.some(en => en.isIntersecting)) loadMore();
+}, { rootMargin: '900px' }).observe($('sentinel'));
+window.addEventListener('scroll', () => { if (!loadingMore && sentinelVisible()) loadMore(); }, { passive: true });
+// Belt-and-braces: some environments throttle observers, so poll lightly.
+setInterval(() => {
+  if (items.length && !loadingMore && sentinelVisible() && Object.values(pager).some(p => !p.done)) loadMore();
+}, 2500);
+
+/* ============================================================
+   DIAGNOSTICS — success rates for browsing, artwork loading,
+   and suggestions across the standard test topics.
+   window.runDiagnostics() / window.__TEST_REPORT__
+   ============================================================ */
+async function runDiagnostics() {
+  const diag = $('diag');
+  const body = $('diag-body');
+  diag.classList.add('show');
+  body.innerHTML = '<em>Running test searches — this loads several hundred images and takes a few minutes…</em>';
+
+  await detectBlockedHosts();
+  const keys = Object.keys(ADAPTERS);
+  const report = [];
+
+  for (const q of TEST_QUERIES) {
+    body.innerHTML = '<em>Testing “' + esc(q) + '”… (' + (report.length + 1) + ' of ' + TEST_QUERIES.length + ')</em>';
+    const entry = { query: q, sources: {}, thumbs: { ok: 0, blocked: 0, failed: [] },
+                    hires: { ok: 0, failed: [], tested: 0 }, suggestions: { ok: 0, tested: 0 } };
+
+    // Page 1 from every source (same path the real search uses).
+    seenKeys.clear();
+    keys.forEach(k => pager[k] = { page: 1, done: false });
+    let lists = await Promise.all(keys.map(async k => {
+      try {
+        const list = await ADAPTERS[k](q, 1);
+        entry.sources[k] = { count: list.length };
+        return list;
+      } catch (e) {
+        entry.sources[k] = { count: 0, error: e.message };
+        return [];
+      }
+    }));
+    let merged = dedupe(interleave(lists));
+
+    // If under 100, emulate one infinite-scroll step (page 2).
+    if (merged.length < 100) {
+      const extra = await Promise.all(keys.map(async k => {
+        if (!entry.sources[k].count) return [];
+        try {
+          const list = await ADAPTERS[k](q, 2);
+          entry.sources[k].count += list.length;
+          return list;
+        } catch (e) { return []; }
+      }));
+      merged = merged.concat(dedupe(interleave(extra)));
+    }
+    entry.merged = merged.length;
+    entry.sourcesReturning = keys.filter(k => entry.sources[k].count > 0).length;
+
+    // Thumbnail success (blocked-host items counted separately).
+    items = merged; // so suggestionsFor can run against this set
+    const probeable = merged.filter(it => !isImageBlocked(it));
+    entry.thumbs.blocked = merged.length - probeable.length;
+    const probes = await withConcurrency(probeable.map(it => () => probeImage(it.thumb)), 8);
+    probes.forEach((p, i) => {
+      if (p.ok) entry.thumbs.ok++;
+      else entry.thumbs.failed.push(probeable[i].thumb + ' (' + p.reason + ')');
+    });
+
+    // Hi-res sample: first probeable work per source.
+    const sample = [];
+    for (const k of keys) {
+      const first = probeable.find(it => it.source === k && it.hires);
+      if (first) sample.push(first);
+    }
+    entry.hires.tested = sample.length;
+    const hiProbes = await withConcurrency(sample.map(it => () => probeImage(it.hires, 30000)), 3);
+    hiProbes.forEach((p, i) => {
+      if (p.ok) entry.hires.ok++;
+      else entry.hires.failed.push(sample[i].hires + ' (' + p.reason + ')');
+    });
+
+    // Suggestions: sample items across the set, require ≥1 suggestion each.
+    const step = Math.max(1, Math.floor(merged.length / 8));
+    for (let i = 0; i < merged.length && entry.suggestions.tested < 8; i += step) {
+      entry.suggestions.tested++;
+      if (suggestionsFor(i, 6).length > 0) entry.suggestions.ok++;
+    }
+
+    report.push(entry);
+    await sleep(6000); // let the Met's rate limiter breathe between topics
+  }
+
+  window.__TEST_REPORT__ = report;
+  renderDiagReport(report);
+  return report;
+}
+
+function renderDiagReport(report) {
+  const keys = Object.keys(ADAPTERS);
+  const rows = report.map(e => {
+    const src = k => e.sources[k]
+      ? (e.sources[k].error ? '<span class="fail">err</span>' : e.sources[k].count)
+      : '—';
+    const thumbTotal = e.thumbs.ok + e.thumbs.failed.length;
+    const okTarget = e.merged >= 100 && e.sourcesReturning >= 6;
+    return '<tr><td>' + esc(e.query) + '</td>'
+      + keys.map(k => '<td>' + src(k) + '</td>').join('')
+      + '<td class="' + (okTarget ? 'oklbl' : 'fail') + '">' + e.merged + ' / ' + e.sourcesReturning + ' src</td>'
+      + '<td class="' + (e.thumbs.failed.length ? 'fail' : 'oklbl') + '">' + e.thumbs.ok + ' / ' + thumbTotal + '</td>'
+      + '<td>' + (e.thumbs.blocked || 0) + '</td>'
+      + '<td class="' + (e.hires.failed.length ? 'fail' : 'oklbl') + '">' + e.hires.ok + ' / ' + e.hires.tested + '</td>'
+      + '<td class="' + (e.suggestions.ok < e.suggestions.tested ? 'fail' : 'oklbl') + '">' + e.suggestions.ok + ' / ' + e.suggestions.tested + '</td></tr>';
+  }).join('');
+
+  const sum = (f) => report.reduce((n, e) => n + f(e), 0);
+  const thumbsOk = sum(e => e.thumbs.ok), thumbsAll = sum(e => e.thumbs.ok + e.thumbs.failed.length);
+  const sgOk = sum(e => e.suggestions.ok), sgAll = sum(e => e.suggestions.tested);
+  const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
+  const failures = report.flatMap(e =>
+    e.thumbs.failed.map(u => '[' + e.query + '] thumb: ' + u)
+      .concat(e.hires.failed.map(u => '[' + e.query + '] hi-res: ' + u)));
+  const apiErrors = report.flatMap(e =>
+    Object.entries(e.sources).filter(([, v]) => v.error)
+      .map(([k, v]) => '[' + e.query + '] ' + SRC_META[k].short + ': ' + v.error));
+  const totalBlocked = sum(e => e.thumbs.blocked || 0);
+
+  $('diag-body').innerHTML =
+      '<strong>Success rates</strong> — browsing: ' + report.length + '/' + TEST_QUERIES.length + ' searches completed'
+    + ' · artworks: ' + pct(thumbsOk, thumbsAll) + ' of probed images loaded'
+    + ' · suggestions: ' + pct(sgOk, sgAll) + ' of sampled works had recommendations'
+    + '<table><tr><th>Query</th>' + keys.map(k => '<th>' + esc(SRC_META[k].short) + '</th>').join('')
+    + '<th>Merged / sources</th><th>Thumbs</th><th>Blocked</th><th>Hi-res</th><th>Suggest</th></tr>'
+    + rows + '</table>'
+    + (totalBlocked
+        ? '<p style="margin-top:8px"><em>' + totalBlocked + ' image(s) skipped: the Art Institute of Chicago image server refuses connections from this network (HTTP 403 / Cloudflare); those works show as metadata-only cards.</em></p>' : '')
+    + (apiErrors.length ? '<p class="fail" style="margin-top:8px"><strong>API errors:</strong></p><ul>' + apiErrors.map(f => '<li class="fail">' + esc(f) + '</li>').join('') + '</ul>' : '')
+    + (failures.length
+        ? '<p class="fail" style="margin-top:8px"><strong>Failed image URLs (' + failures.length + '):</strong></p><ul>' + failures.slice(0, 20).map(f => '<li class="fail">' + esc(f) + '</li>').join('') + '</ul>'
+        : '<p class="oklbl" style="margin-top:8px">All probed images loaded successfully.</p>');
+}
+
+window.runDiagnostics = runDiagnostics;
+
+/* ============================================================
+   EVENTS + STARTUP
+   ============================================================ */
+const qInput = $('q');
+
+grid.addEventListener('click', e => {
+  const card = e.target.closest('.card');
+  if (card) openModal(Number(card.dataset.i));
+});
+$('goBtn').addEventListener('click', () => runSearch(qInput.value));
+qInput.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(qInput.value); });
+moreBtn.addEventListener('click', loadMore);
+overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+$('modalClose').addEventListener('click', closeModal);
+$('diagBtn').addEventListener('click', runDiagnostics);
+$('diagClose').addEventListener('click', () => $('diag').classList.remove('show'));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if (e.key === '/' && document.activeElement !== qInput) { e.preventDefault(); qInput.focus(); qInput.select(); }
+});
+
+if (new URLSearchParams(location.search).get('autotest') === '1') {
+  runDiagnostics();
+} else {
+  qInput.value = 'impressionist painting';
+  runSearch(qInput.value);
+}
+</script>
+</body>
+</html>
