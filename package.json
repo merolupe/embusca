@@ -1,0 +1,12 @@
+{
+  "name": "embusca",
+  "private": true,
+  "description": "One search across open museum collections — static page, no build, no keys, no dependencies.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:ui": "node tests/browser/ui.js",
+    "test:live": "node tests/live.js",
+    "test:compare": "node tests/live.js --compare",
+    "serve": "python3 -m http.server 8420"
+  }
+}
